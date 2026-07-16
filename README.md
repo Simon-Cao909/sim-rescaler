@@ -5,3 +5,5 @@ A tool created from my research with SuperCDMS. When a particle hits a germanium
 From that, we use machine learning to predict where the particle had landed and the energy deposition. However, as machine learning requires labelled training data, we use simulated events that tell us the event position and energy. Expectedly, these simulations do not perfectly match real events, so we must perform a rescaling.
 
 This tool was created to provide an interactive interface to do that rescaling and streamline the process.
+
+* Requires CERN ROOT with Python bindings enabled
