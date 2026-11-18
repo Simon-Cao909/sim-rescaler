@@ -6,7 +6,7 @@ from contextlib import nullcontext
 
 fsize = (17,4)
 
-def frac_plotter(f_sim_x,f_sim_y,f_data_x,f_data_y,x_chan,y_chan,dpi,nbins = 101, for_export=False):
+def frac_plotter(f_sim_x,f_sim_y,f_data_x,f_data_y,x_chan,y_chan,dpi,nbins = 101,for_export=False,scatter_size=0.2):
 
     context = nullcontext() if for_export else plt.style.context("default")
 
@@ -18,7 +18,7 @@ def frac_plotter(f_sim_x,f_sim_y,f_data_x,f_data_y,x_chan,y_chan,dpi,nbins = 101
 
         frac_hist(f_sim_x,f_data_x,x_chan,ax1,nbins=nbins,for_export=for_export)
         frac_hist(f_sim_y,f_data_y,y_chan,ax2,nbins=nbins,for_export=for_export)
-        frac_scatter(f_sim_x,f_sim_y,f_data_x,f_data_y,x_chan,y_chan,ax3,for_export)
+        frac_scatter(f_sim_x,f_sim_y,f_data_x,f_data_y,x_chan,y_chan,ax3,for_export,scatter_size=scatter_size)
 
         fig.tight_layout(rect=[0, 0, 1, 0.95])
 
@@ -68,7 +68,7 @@ def frac_hist(f_sim, f_data, chan_name, ax, nbins = 101, for_export=True):
     ax.grid(True, lw = 0.2, ls = '--', color = 'black')
     ax.legend(frameon=False,fontsize=fsize)
 
-def frac_scatter(f_sim_x, f_sim_y, f_data_x, f_data_y, x_chan, y_chan, ax, for_export = True):
+def frac_scatter(f_sim_x, f_sim_y, f_data_x, f_data_y, x_chan, y_chan, ax, for_export = True, scatter_size = 0.2):
     # Bounds for plotting
     low_lim = min([min(f_sim_x), min(f_sim_y), min(f_data_x), min(f_data_y)])
     high_lim = max([max(f_sim_x), max(f_sim_y), max(f_data_x), max(f_data_y)])
@@ -76,8 +76,8 @@ def frac_scatter(f_sim_x, f_sim_y, f_data_x, f_data_y, x_chan, y_chan, ax, for_e
     low_lim -= 0.15*range_lim
     high_lim += 0.15*range_lim
 
-    ax.scatter(f_sim_x, f_sim_y, s = 0.2, marker = '.', color = '#9999FF', label= 'Simulation')
-    ax.scatter(f_data_x, f_data_y, s = 0.2, marker = '.', color = 'black', label = 'Data')
+    ax.scatter(f_sim_x, f_sim_y, s = scatter_size, marker = '.', color = '#9999FF', label= 'Simulation')
+    ax.scatter(f_data_x, f_data_y, s = scatter_size, marker = '.', color = 'black', label = 'Data')
 
     fsize = 35 if for_export else 13
     lblsize = 35 if for_export else 12

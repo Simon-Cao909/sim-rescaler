@@ -23,9 +23,9 @@ import string
 import ipywidgets as widgets
 from IPython.display import display, clear_output
 
-from tools.getters import get_ring_or_central, get_param_lt
-from tools.validation import frac_plotter, frac_hist, frac_scatter, frac_contour, get_empty
-from tools.transforms import quad_transform, legendre_quad_transform, power_transform, \
+from .tools.getters import get_ring_or_central, get_param_lt
+from .tools.validation import frac_plotter, frac_hist, frac_scatter, frac_contour, get_empty
+from .tools.transforms import quad_transform, legendre_quad_transform, power_transform, \
                        inverse_quad_transform, inverse_legendre_quad_transform
 
 CHAN_LIST = ('PAS1','PBS1','PCS1','PDS1','PES1','PFS1',
@@ -33,8 +33,24 @@ CHAN_LIST = ('PAS1','PBS1','PCS1','PDS1','PES1','PFS1',
 
 def apply_cuts(df, cuts, cut_var, inclusive):
     '''
-    Applies the given cuts to the dataframe
-    Returns a dictionary of the cut dataframes
+    Applies cuts to a dataframe.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The dataframe to cut.
+    cuts : dict
+        Mapping of cut labels to (lower, upper) bounds.
+    cut_var : str
+        Name of the dataframe column used for the cuts.
+    inclusive : bool
+        If True, include the cut bounds; otherwise, exclude them.
+    
+    Returns
+    -------
+    dict or pandas.DataFrame
+        A dictionary of cut dataframes when cuts are provided, or the
+        original dataframe when no cuts are provided.
     '''
     if not cuts:
         return df
@@ -58,8 +74,39 @@ def nll_diff(params, x_arr, y_arr, oth_xy, fit,
         rescale_fn,
         n_params_x,n_params_y):
     '''
-    Calculates the negative log likelihood when applying the kde
-    to the item being rescaled
+    Calculates the negative log likelihood when applying the KDE to the
+    item being rescaled.
+    
+    Parameters
+    ----------
+    params : array-like
+        Parameters used by the rescaling function.
+    
+    x_arr, y_arr : array-like
+        Coordinates used to fit the KDE.
+    
+    oth_xy : array-like
+        Coordinates at which the log likelihood is evaluated.
+    
+    fit : sequence of bool
+        Indicates which coordinates are being fitted.
+    
+    setting_x, setting_y : str
+        Rescaling settings for the x and y coordinates.
+    
+    bandwidth : float
+        KDE bandwidth.
+    
+    rescale_fn : callable
+        Function used to rescale the coordinates.
+    
+    n_params_x, n_params_y : int
+        Number of rescaling parameters for the x and y coordinates.
+    
+    Returns
+    -------
+    float
+        Negative log likelihood.
     '''
     params = iter(params)
 
@@ -82,8 +129,36 @@ def nll_same(params, kde, x_arr, y_arr, fit,
              rescale_fn,
              n_params_x,n_params_y):
     '''
-    Calculates the negative log likelihood when applying the kde
-    to the target
+    Calculates the negative log likelihood when applying the KDE to the
+    target.
+    
+    Parameters
+    ----------
+    params : array-like
+        Parameters used by the rescaling function.
+    
+    kde : sklearn.neighbors.KernelDensity
+        KDE used to evaluate the target.
+    
+    x_arr, y_arr : array-like
+        Coordinates of the target.
+    
+    fit : sequence of bool
+        Indicates which coordinates are being fitted.
+    
+    setting_x, setting_y : str
+        Rescaling settings for the x and y coordinates.
+    
+    rescale_fn : callable
+        Function used to rescale the coordinates.
+    
+    n_params_x, n_params_y : int
+        Number of rescaling parameters for the x and y coordinates.
+    
+    Returns
+    -------
+    float
+        Negative log likelihood.
     '''
     params = iter(params)
             
@@ -102,106 +177,142 @@ def nll_same(params, kde, x_arr, y_arr, fit,
 @dataclass
 class SimRescaler:
     '''
-    SimRescaler is a tool used to rescale DMC simulation to match real data
-
-    It provides an interactive interface that can be used to guess parameters,
-    fit parameters, and see validation plots
-
-    Required Attributes
-    -------------------
-    - data (pd.DataFrame or dict): The data dataframe or a dictionary of data dataframes
-    - sim (pd.DataFrame or dict): The simulation dataframe or a dictionary of simulation dataframes
-
+    Tool for rescaling DMC simulation to match real data.
     
-    Semi-required attributes
-    ------------------------
-    - init_params (dict): A dictionary of the form {chan:[p1,p2,...],...}
-                          This specifies the initial parameters used for rescaling
-                          This is required for semiauto_fit(), 'Initial' in see_validation(), and export_params()
-                          This is not required otherwise and can be determined through find_init_params()
-
-    - n_params (dict): A dictionary of the form {chan:n_param,...}
-                       This specifies the number of parameters for each channel
-                       This is required for find_init_params() if self.init_params was not given
-
-    - fitted_params (dict): A dictionary of the form {chan:[p1,p2,...],...}
-                            This specifies the fitted parameters used for rescaling
-                            This is required for 'Fitted' in see_validation() and for export_params()
-                            This is not required otherwise and can be determined through semiauto_fit() or auto_fit()
-
-    - errs (dict): A dictionary of the form {chan:{'parab':[err1,...],'+':[...],'-':[...],'gcc':[...]},...}
-                   This specifies the errors for the fitting, including the parabolic error, +minos, -minos, and
-                   global correlation coefficient
-                   All but the gcc (that can be left as []) is required for export_params()
-
-
-    Optional Attributes
-    -------------------
-    - channels (list or tuple, default=CHAN_LIST): The channels to be used
-
-    - data_cuts (dict,default=None): A dictionary of the form {shell_name:(cut_lo,cut_hi),...}
-                                     If data was given as a single dataframe, this will cut it
-                                     into {shell_name:df_cut,...} and reassign it to self.data
-    - data_cut_var (str,default=None): The variable used in the data cut (ex. PTOFamps)
-    - data_cut_inclusive (bool,default=True): Whether to include the bounds in the cut
-
-    - sim_cuts (dict,default=None): A dictionary of the form {shell_name:(cut_lo,cut_hi),...}
-                                    If simulation was given as a single dataframe, this will cut it
-                                    into {shell_name,df_cut} and reassign it to self.sim
-    - sim_cut_var (str,default=None): The variable used in the simulation cut (ex. PTOFamps)
-    - sim_cut_inclusive (bool,default=True): Whether to include the bounds in the cut
-
-    - rescale_fn (callable,default=quad_transform): The rescaling function used
-                                                    Must accept parameters (x,params,setting) in that order
-                                                    - x is the variable to be rescaled
-                                                    - params is the parameters used
-                                                    - setting will be given by 'get_setting'. Default is 'ring' or 'central'
-                                                        - This is used for treating different channels differently
-    - inverse_fn (callable,default=inverse_quad_transform): The inverse of the rescaling function used
-                                                            Must accept parameters (x,y,params,setting) in that order
-                                                            - x is the parameter that was rescaled in the forward transform
-                                                                - This is included only if you want to perform branch-cuts on
-                                                                  non-monotonic functions
-                                                            - y is the parameter to be rescaled in the inverse transform
-                                                            - params is the parameters used
-                                                            - setting will be given by get_setting. Default is 'ring' or 'central'
-                                                                - This is used for treating different channels differently
-                                                            * You can raise exceptions in this function for any reason
-    - get_setting (callable,default=get_ring_or_central): A function used that should accept only the channel name (ex. PAS1)
-                                                          and return a string describing the setting associated with that channel
+    The class provides interactive interfaces for choosing and fitting
+    rescaling parameters, and for generating validation plots.
     
-    - fit_dict (dict,default=None): A dictionary of the form {(chan_1,chan_2):(0 or 1,0 or 1),...}
-                                    This will be used in auto_fit only for the channels used for fitting
-                                    and the order in which to fit it
-                                    If you plan to use semiauto_fit, leave this as None
-    
-    - bandwidth (float,d    efault=0.003): The bandwidth used for the KDE when fitting
-    - samples (int,default=1000): The number of samples used from the data and simulation to do the fitting
+    Parameters
+    ----------
+    data : pandas.DataFrame or dict
+        Data dataframe, or a dictionary mapping shell names to dataframes.
 
-    - fit_to (str,default='data'): Must be either 'data' or 'sim'
-                                   If 'data', the simulation will be rescaled
-                                   If 'sim', the data will be rescaled
-    - apply_kde_to (str,default='sim'): Must be either 'data' or 'sim'
-                                        Controls which one to apply the KDE to
-                                   
-    - max_iter (int,default=1e5): The maximum number of calls for the minuit fit
-    - tol (float,default=0.05): The tolerance for the minuit fit
+    simulation : pandas.DataFrame or dict
+        Simulation dataframe, or a dictionary mapping shell names to dataframes.
     
-    - nbins (int or dict,default=101): If int, this will be the number of bins used in the validation histograms
-                                       If dict, it must be of the form {shell_name:num_bins,...}, where you can
-                                       specify the number of bins for each shell
-    - dpi (int,default=100): The dots per inch (resolution of the image) for the figures
-    - xlim (dict or tuple,default=None): The xlim for the validation histograms
-                                         This will also be the ylim of the scatter plot
-                                         If dict, it should be of the form {shell_name1:xlim1,...}
-                                         where each shell will have its own xlim
-    - ylim (dict or tuple,default=None): The ylim for the validation histograms
-                                         If dict, it should be of the form {shell_name1:ylim1,...}
-                                         where each shell will have its own ylim
+    channels : sequence of str, default=CHAN_LIST
+        Channels to be used.
+    
+    data_cuts : dict or None, default=None
+        Mapping of shell names to (lower, upper) data-cut bounds. If `data`
+        is a single dataframe, it is split into shell-specific dataframes.
+    
+    data_cut_var : str or None, default=None
+        Dataframe column used for the data cuts (for example, ``PTOFamps``).
+    
+    data_cut_inclusive : bool, default=True
+        Whether to include the bounds in the data cuts.
+    
+    sim_cuts : dict or None, default=None
+        Mapping of shell names to (lower, upper) simulation-cut bounds. If
+        `simulation` is a single dataframe, it is split into shell-specific
+        dataframes.
+    
+    sim_cut_var : str or None, default=None
+        Dataframe column used for the simulation cuts (for example, ``PTOFamps``).
+    
+    sim_cut_inclusive : bool, default=True
+        Whether to include the bounds in the simulation cuts.
+    
+    rescale_fn : callable, default=quad_transform
+        Function used for rescaling. It must accept ``(x, params, setting)``
+        in that order. The setting is obtained from `get_setting` and is
+        typically ``'ring'`` or ``'central'``.
+    
+    inverse_fn : callable, default=inverse_quad_transform
+        Inverse of the rescaling function. It must accept
+        ``(x, y, params, setting)`` in that order. The ``x`` argument is the
+        parameter in the forward transform, and ``y`` is the parameter to
+        rescale in the inverse transform. This is useful for branch cuts on
+        non-monotonic functions. The function may raise exceptions.
+    
+    get_setting : callable, default=get_ring_or_central
+        Function that accepts a channel name (for example, ``'PAS1'``) and
+        returns the setting associated with that channel.
+    
+    init_params : dict or None, default=None
+        Initial rescaling parameters, mapped by channel. Required by
+        `semiauto_fit`, by the ``'Initial'`` option in `see_validation`,
+        and by `export_params`. If omitted, they can be determined using
+        `find_init_params`.
+    
+    n_params : dict or None, default=None
+        Number of parameters for each channel. Required by
+        `find_init_params` when `init_params` is not provided.
+    
+    fitted_params : dict or None, default=None
+        Fitted rescaling parameters, mapped by channel. Required by the
+        ``'Fitted'`` option in `see_validation` and by `export_params`.
+        Can be populated using `semiauto_fit` or `auto_fit`.
+    
+    errs : dict or None, default=None
+        Fit uncertainties for each channel, including parabolic errors,
+        positive and negative MINOS errors, and the global correlation
+        coefficient. Required by `export_params`, except that the GCC may
+        be left as an empty list.
+    
+    fit_dict : dict or None, default=None
+        Mapping of channel pairs to fitting flags, of the form
+        ``{(chan_1, chan_2): (0 or 1, 0 or 1), ...}``. Used by `auto_fit`
+        to specify which channels are fitted and the fitting order. Leave
+        as None when using `semiauto_fit`.
+    
+    bandwidth : float, default=0.003
+        KDE bandwidth used during fitting.
+    
+    samples : int, default=1000
+        Number of data and simulation samples used for fitting.
+    
+    fit_to : str, default='data'
+        Dataset to fit against; must be ``'data'`` or ``'sim'``. If
+        ``'data'``, the simulation is rescaled. If ``'sim'``, the data is
+        rescaled.
+    
+    apply_kde_to : str, default='sim'
+        Dataset to which the KDE is applied; must be ``'data'`` or ``'sim'``.
+    
+    bounds : dict or None, default=None
+        Parameter bounds, mapped by channel.
+    
+    max_iter : int, default=100000
+        Maximum number of calls for the Minuit fit.
+    
+    tol : float, default=0.05
+        Tolerance for the Minuit fit.
+    
+    scatter_size : float or int, default=0.2:
+        The size of the dots in the validation scatter plots
 
-    - fitted_export_path (str,default="params.csv"): The export path of the fitted parameters (used in semiauto_fit)
-    - init_export_path (str,default="init_params.csv"): The export path of the initial parameters (used in find_init_params)
-    - img_dir (str,default=""): The directory to save the validation plots in (used in see_validation)
+    nbins : int or dict, default=101
+        Number of bins in validation histograms. If a dictionary is given,
+        it maps shell names to their respective bin counts.
+    
+    dpi : int, default=100
+        Figure resolution in dots per inch.
+    
+    xlim : dict, tuple, or None, default=None
+        x-axis limits for validation histograms; these are also used as
+        the y-axis limits of the scatter plot. A dictionary can specify
+        separate limits for each shell.
+    
+    ylim : dict, tuple, or None, default=None
+        y-axis limits for validation histograms. A dictionary can specify
+        separate limits for each shell.
+    
+    fitted_export_path : str, default='params.csv'
+        Output path for fitted parameters, used by `semiauto_fit`.
+    
+    init_export_path : str, default='init_params.csv'
+        Output path for initial parameters, used by `find_init_params`.
+    
+    img_dir : str, default=''
+        Directory in which validation plots are saved by `see_validation`.
+    
+    Notes
+    -----
+    The ``init_params``, ``n_params``, ``fitted_params``, and ``errs``
+    attributes are semi-required: which ones are needed depends on the
+    methods and validation options being used.
     '''
     data: Union[pd.DataFrame, Mapping[str, pd.DataFrame]]
     simulation: Union[pd.DataFrame, Mapping[str, pd.DataFrame]]
@@ -233,6 +344,7 @@ class SimRescaler:
     tol: float = 0.05
     fit_dict: Optional[Dict[Tuple[str,str],Tuple[int,int]]] = None
 
+    scatter_size: int = 0.2
     nbins: Union[int,Dict[str,int]] = 101
     dpi: int = 100
     xlim: Optional[Union[Dict[str,Tuple[float,float]],Tuple[float,float]]] = None
@@ -288,11 +400,19 @@ class SimRescaler:
                 if self.init_params is not None:
                     params = self.init_params[chan]
                     for param in params:
-                        bound = (0,3*param) if param > 0 else (3*param,0)
-                else:
-                    bound = (-10,10)
-                
-                self.bounds[chan].append(bound)
+                        if param > 0:
+                            bound = (0, 3*param)
+                        elif param < 0:
+                            bound = (3*param, 0)
+                        else:
+                            bound = (-5, 5)
+
+                        self.bounds[chan].append(bound)
+                        
+                elif self.n_params is not None:
+                    self.bounds[chan] = [
+                        (-10, 10) for _ in range(self.n_params[chan])
+                    ]
         
         if self.n_params is None and self.init_params is not None:
             self.n_params = {c:len(self.init_params[c]) for c in self.channels}
@@ -496,8 +616,24 @@ class SimRescaler:
 
     def semiauto_fit(self):
         '''
-        Provides an interactive interface for parameter fitting
-        Will use ROOT TMinuit for fitting and track uncertainties
+        Provides an interactive interface for parameter fitting using ROOT
+        TMinuit and tracking parameter uncertainties.
+        
+        The interface allows you to select two channels, fit their parameters,
+        inspect validation plots, and export the fitted parameters and
+        uncertainties. The export path is `fitted_export_path`, which defaults
+        to ``'params.csv'``.
+
+        SimRescaler must have the following to use this method:
+            init_params : dict
+                Initial parameters for the channels being fitted.
+
+                Populated using `find_init_params` or during initialization
+            
+            bounds : dict
+                Parameter bounds for the channels being fitted.
+
+                Populated using `find_init_params` or during initialization
         
         METHOD:
         1. Select two channels that you'd like to fit from the check boxes
@@ -508,10 +644,6 @@ class SimRescaler:
         5. Press 'Export' if you want to, which will create a .csv file containing
            the fitted parameters and uncertainties. The filepath was either specified
            during initialization as fitted_export_path or will be "params.csv"
-
-        REQUIRES:
-        - init_params
-        - bounds
         '''
         self.output = widgets.Output()
 
@@ -753,13 +885,20 @@ class SimRescaler:
 
     def export_params(self):
         '''
-        Exports the initial parameters, fitted parameters, and uncertainties
-
-        REQUIRES:
-        - init_params (updated through find_init_params())
-        - fitted_params (updated through semiauto_fit() or auto_fit())
-        - errs (updated through semiauto_fit() or auto_fit())
-        - bounds
+        Exports the initial parameters, fitted parameters, and uncertainties.
+        
+        SimRescaler must have the following to use this method:
+            init_params : dict
+                Initial parameters, populated using `find_init_params` or during initialization.
+            
+            fitted_params : dict
+                Fitted parameters, populated using `semiauto_fit` or `auto_fit`.
+            
+            errs : dict
+                Parameter uncertainties, populated using `semiauto_fit` or `auto_fit`.
+            
+            bounds : dict
+                Parameter bounds, populated using `find_init_params` or during initialization.
         '''
         df = pd.DataFrame(index=self.channels)
         most_params = max(len(p) for p in self.init_params.values())
@@ -1158,7 +1297,8 @@ class SimRescaler:
                            self.ax_hist_3) = frac_plotter(x_sim,y_sim,
                                                          x_data,y_data,
                                                          self.x_chan,self.y_chan,
-                                                         self.dpi,num_bins)
+                                                         self.dpi,num_bins,
+                                                         scatter_size=self.scatter_size)
             
             self._set_lims(self.ax_hist_1,
                            self.ax_hist_2,
@@ -1173,7 +1313,17 @@ class SimRescaler:
 
     def find_init_params(self):
         '''
-        Provides an interactive interface for finding the initial parameters
+        Provides an interactive interface for finding the initial parameters.
+        
+        The interface allows you to select channel pairs, edit their initial
+        parameters, and inspect how the validation plots change. The parameters
+        are saved automatically. Use the Export button to write them to
+        `init_export_path`, which defaults to ``'init_params.csv'``.
+        
+        SimRescaler must have the following to use this method:
+            n_params : dict
+                Number of parameters for each channel, if `init_params` was not
+                supplied during initialization.
         
         METHOD:
         1. Select the channels you'd like to fit from the dropdown
@@ -1183,9 +1333,6 @@ class SimRescaler:
         4. Press the 'export' button when you are done
            The filepath is init_export_path specified on initialization
            If none was given, it is init_params.csv
-        
-        REQUIRES:
-        - n_params if init_params was not given
         '''
         self.output2 = widgets.Output()
 
@@ -1338,9 +1485,9 @@ class SimRescaler:
             setting = self.get_setting(c)
 
             if setting == current_setting_1:
-                self.init_params[c] = current_params_1
+                self.init_params[c] = current_params_1.copy()
             elif setting == current_setting_2:
-                self.init_params[c] = current_params_2
+                self.init_params[c] = current_params_2.copy()
 
     def _use_same_for_other_side(self):
         current_params_1 = self.init_params[self.selected_chan2_1]
@@ -1358,8 +1505,8 @@ class SimRescaler:
         oth_chan_1 = f"{letters_1}{oth_side_1}"
         oth_chan_2 = f"{letters_2}{oth_side_2}"
 
-        self.init_params[oth_chan_1] = current_params_1
-        self.init_params[oth_chan_2] = current_params_2
+        self.init_params[oth_chan_1] = current_params_1.copy()
+        self.init_params[oth_chan_2] = current_params_2.copy()
 
     def _guess_bounds(self):
         self.bounds = {}
@@ -1417,7 +1564,8 @@ class SimRescaler:
                         self.ax_hist2_3) = frac_plotter(sim_1,sim_2,
                                                         data_1,data_2,
                                                         self.selected_chan2_1,self.selected_chan2_2,
-                                                        self.dpi,num_bins)
+                                                        self.dpi,num_bins,
+                                                        scatter_size=self.scatter_size)
 
             self._set_lims(self.ax_hist2_1,
                            self.ax_hist2_2,
@@ -1430,15 +1578,33 @@ class SimRescaler:
     
     ### INTERACTIVE 3 ###
 
-    def see_validation(self,add_random=False):
+    def see_validation(self,add_random=False,add_suffix=""):
         '''
-        Provides an interactive interface for viewing validation plots
-
-        :param add_random (bool): If True, adds a random string of letters after the exported file name
-                                  This is so, when adding to confluence, the images do not 
-                                  overwrite each other
-                                  If False, nothing is done
-
+        Provides an interactive interface for viewing validation plots.
+        
+        Parameters
+        ----------
+        add_random : bool, default=False
+            If True, append a random string of letters to each exported filename.
+            This prevents images from overwriting one another when adding them
+            to Confluence.
+        
+        add_suffix : str, default=""
+            Appends the given string to the end of the exported files
+        
+        The interface allows you to choose the validation type (fitted,
+        initial, or no rescaling), select channels, and export the current
+        plots or plots for all channels.
+        
+        SimRescaler must have the following to use this method:
+            fitted_params : dict
+                Required to view plots using fitted rescaling parameters.
+            init_params : dict
+                Required to view plots using initial rescaling parameters.
+            fit_dict : dict
+                Required to export all scatter plots. It is created by
+                `semiauto_fit` or supplied during initialization.
+        
         METHOD:
         1. Select the type of validation plot you want to see from the dropdown
             - Fitted: For fitted parameters scaling
@@ -1447,13 +1613,9 @@ class SimRescaler:
         2. Select the channels from the dropdown that you'd like to see the validation plots of
         3. Click 'Export current' to export the images of the current plots
            or 'Export all' to export the images for all channels
-        
-        REQUIRES:
-        - fitted_params if you want to see the plots with fitted rescaling
-        - init_params if you want to see the plots with initial rescaling
-        - fit_dict (created with semiauto_fit() or in initialization) if you want to export all scatter plots
         '''
         self.add_random = add_random
+        self.add_suffix = add_suffix
 
         self.output3 = widgets.Output()
 
@@ -1612,10 +1774,13 @@ class SimRescaler:
                     ax.set_ylim(*ylim)
 
                 if self.add_random:
-                    s = ''.join(random.choices(string.ascii_lowercase, k=6))
+                    s = ''.join(random.choices(string.ascii_lowercase, k=8))
                 else:
                     s = ''
-                fig.savefig(os.path.join(self.img_dir,f"{chan}_hist{s}{self.img_extension}"))
+
+                fig.tight_layout()
+                fig.savefig(os.path.join(self.img_dir,f"{chan}_hist{s}{self.selected_shell3}{self.add_suffix}{self.img_extension}"))
+                plt.close(fig)
         
         if scatter_pairs is None:
             return
@@ -1651,15 +1816,18 @@ class SimRescaler:
 
             if params_exist:
                 fig,ax = plt.subplots()
-                frac_scatter(sim_1,sim_2,data_1,data_2,chan_1,chan_2,ax)
+                frac_scatter(sim_1,sim_2,data_1,data_2,chan_1,chan_2,ax,scatter_size=self.scatter_size)
 
                 if self.xlim is not None:
                     xlim = self.xlim if isinstance(self.xlim,tuple) else self.xlim[self.selected_shell3]
                     ax.set_xlim(*xlim)
 
                 if self.add_random:
-                    s = ''.join(random.choices(string.ascii_lowercase, k=6))
-                fig.savefig(os.path.join(self.img_dir,f"{chan_1}_{chan_2}_scatter{s}{self.img_extension}"))
+                    s = ''.join(random.choices(string.ascii_lowercase, k=8))
+
+                fig.tight_layout()
+                fig.savefig(os.path.join(self.img_dir,f"{chan_1}_{chan_2}_scatter{s}{self.selected_shell3}{self.add_suffix}{self.img_extension}"))
+                plt.close(fig)
 
     def _redraw_static3(self):
         err_message = "No fit"
@@ -1708,7 +1876,8 @@ class SimRescaler:
                             self.ax_hist3_3) = frac_plotter(sim_1,sim_2,
                                                             data_1,data_2,
                                                             chan_1,chan_2,
-                                                            self.dpi,num_bins)
+                                                            self.dpi,num_bins,
+                                                            scatter_size=self.scatter_size)
             else:
                 self.fig3, (self.ax_hist3_1,
                             self.ax_hist3_2,
@@ -1728,24 +1897,38 @@ class SimRescaler:
     
     def auto_fit(self,fit_dict=None,verbose=0):
         '''
-        Automatically fits and updates the parameters
-
-        :param fit_dict (dict or None): A dictionary of the form {(chan_1,chan_2):(0 or 1,0 or 1),...}
-                                        The order of the dictionary corresponds to the order that the fitting 
-                                        will be done
-                                        If 0, fitting will not be done for that channel and it will use the 
-                                        previous fitted parameters
-                                        If 1, fitting will be done for that channel and the fitted parameters
-                                        will be updated
-                                        If none, fit_dict must have been specified during initialization
-        :param verbose (int): Must be 0, 1, or 2
-                              The larger the number, the more fitting information will be printed
+        Automatically fits and updates the parameters.
         
-        Once you are done doing the auto_fit, you may want to run .export_params(), which will export
-        a .csv file containing the fitted parameters and uncertainties. The filepath was either
-        specified during initialization with fitted_export_path or is 'params.csv'
+        Parameters
+        ----------
+        fit_dict : dict or None, default=None
+            Mapping of channel pairs to fitting flags, of the form:
+
+            ``{(chan_1, chan_2): (0 or 1, 0 or 1), ...}``
+            
+            The dictionary order determines the fitting order.
+            
+            A flag of 0 skips fitting that channel and uses its previously fitted parameters.
+            A flag of 1 fits the channel and updates its parameters.
+            
+            If None, `fit_dict` must have been supplied during initialization.
+        
+        verbose : int, default=0
+            Verbosity level.
+            
+            Must be 0, 1, or 2
+            
+            Larger values print more fitting information.
+        
+        After fitting, you may want to call `export_params` to export the
+        fitted parameters and uncertainties. The output path is
+        `fitted_export_path`, which defaults to ``'params.csv'``.
         '''
-        fit_dict = self.fit_dict if fit_dict is None else fit_dict
+        if fit_dict is not None:
+            self.fit_dict = fit_dict
+
+        fit_dict = self.fit_dict
+
         self.channels_fitted_label = widgets.Label(value="Channels fitted:")
         self._clear(redraw=False)
 
@@ -1801,11 +1984,15 @@ class SimRescaler:
 
     def load_init_params(self,filepath):
         '''
-        Loads the initial parameters from an exported .csv file
-        The expected format is the same format gotten from pressing Export on 
-        find_init_params
-
-        :param filepath (str): The filepath of the .csv file
+            Loads the initial parameters from an exported CSV file.
+            
+            The expected format is the one produced by the Export button in
+            `find_init_params`.
+            
+            Parameters
+            ----------
+            filepath : str
+                Path to the CSV file.
         '''
         df = pd.read_csv(filepath,index_col=0)
 
@@ -1840,11 +2027,15 @@ class SimRescaler:
 
     def load_all(self,filepath):
         '''
-        Loads all the parameters and uncertainties from an exported .csv file
-        The expected format is the same format gotten from pressing Export on
-        semiauto_fit
-
-        :param filepath (str): The filepath of the .csv file
+            Loads all parameters and uncertainties from an exported CSV file.
+            
+            The expected format is the one produced by the Export button in
+            `semiauto_fit`.
+            
+            Parameters
+            ----------
+            filepath : str
+                Path to the CSV file.
         '''
         df = pd.read_csv(filepath,index_col=0)
 

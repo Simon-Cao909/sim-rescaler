@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sim-rescaler"
-version = "1.0.0"
+version = "1.1.0"
 description = "A Python package for rescaling simulated event quantities."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib",
     "scikit-learn",
     "ipywidgets",
+    "tensorflow"
 ]
 
 [tool.setuptools.packages.find]
